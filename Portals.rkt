@@ -1,0 +1,214 @@
+#lang racket
+(require 2htdp/universe 2htdp/image)
+(require 2htdp/batch-io)
+;(require racket/runtime-path)
+
+(struct player (imagem posx posy) #:mutable)
+(struct portal (posx-in posy-in posx-out posy-out ativo-in ativo-out) #:mutable)
+(struct contato-cenario (posx-i posx-f posy)#:mutable)
+(struct death-zone (posx-i posy-i posx-f posy-f) #:mutable)
+
+;CRIAR SPRITE DO JOGADOR CORRENDO A DIREITA E A ESQUERDA, CONTROLADAS POR UMA VARIAVEL DE STATUS DE DIRECAO E UM CONTADOR QUE RESETA E IMPRIME AS IMAGENS EM LOOP
+;CRIAR IMAGENS PARA QUANDO ESTÁ PARADO E CAINDO
+
+(define pontuacao 0)
+
+(define portal-final-posx 20)
+(define portal-final-posy 116)
+
+(define save-temp '())
+
+(define PORTAL-IN-IMAGE (bitmap/file "Portal-In.png"))
+(define PORTAL-OUT-IMAGE (bitmap/file "Portal-Out.png"))
+(define JOGADOR (player (bitmap/file "Player-Image.png") 32 476))
+(define CENARIO (bitmap/file "Level-Image.png"))
+(define VAZIO (bitmap/file "Empty-Image.png"))
+(define DARK-SCREEN (bitmap/file "Dark-Screen.png"))
+
+(define CONTATO-0 (contato-cenario 0 800 555))
+(define CONTATO-1 (contato-cenario 658 800 430))
+(define CONTATO-2 (contato-cenario 311 480 362))
+(define CONTATO-3 (contato-cenario 470 635 258))
+(define CONTATO-4 (contato-cenario 220 378 203))
+(define CONTATO-5 (contato-cenario 0 165 150))
+
+;(define DEATHZONE-0 (death-zone 307 555 474 600)) ;------------------------------------------------------------------------------------DEATHZONE
+; PARA DEATHZONES MÓVEIS, MOVÊ-LAS DURANTE O ON-TICK
+; O MESMO PARA PARTES MÓVEIS DO CENÁRIO, LEMBRAR DE MOVER O JOGADOR JUNTO QUANDO ESTE ESTIVER SOBRE UMA DELAS
+
+(define PORTAL (portal 0 0 0 0 #f #f))
+
+(define status "game")
+
+(define CONTATOS (cons CONTATO-0 (cons CONTATO-1 (cons CONTATO-2 (cons CONTATO-3 (cons CONTATO-4 (cons CONTATO-5 empty)))))))
+
+;(define DEATHZONES (cons DEATHZONE-0 empty)) ;----------------------------------------------------------------------------------------DEATHZONE
+
+(define DEATHZONES '())
+
+(define (COLISAO-CENARIO cont)
+  (if (empty? cont) #f (or (COLIDE JOGADOR (first cont))(COLISAO-CENARIO (rest cont)))))
+
+(define (COLIDE jog cont)
+  (if (and (= (+ (player-posy jog) 27) (contato-cenario-posy cont)) (and (>= (+ (player-posx jog) 18) (contato-cenario-posx-i cont)) (<= (- (player-posx jog) 18) (contato-cenario-posx-f cont)))) #t #f))
+
+(define (DEATHZONE deathzone-list)
+  (if (empty? deathzone-list) #f (or (ESTA-DEATHZONE (first deathzone-list)) (DEATHZONE (rest deathzone-list)))))
+  
+(define (ESTA-DEATHZONE deathzone-point)
+  (if (and (and (> (+ (player-posx JOGADOR) 18) (death-zone-posx-i deathzone-point)) (< (- (player-posx JOGADOR) 18) (death-zone-posx-f deathzone-point))) (and (> (+ (player-posy JOGADOR) 27) (death-zone-posy-i deathzone-point)) (< (- (player-posy JOGADOR) 27) (death-zone-posy-f deathzone-point)))) #t #f))
+
+(define (gravity)
+  (if (COLISAO-CENARIO CONTATOS) (set-player-posy! JOGADOR (player-posy JOGADOR)) (set-player-posy! JOGADOR (+ (player-posy JOGADOR) 1))))
+
+(define (GRAVIDADE-E-PORTAIS a)
+  (gravity)
+  (gravity)
+  (gravity)
+  (gravity)
+  (gravity)
+  (gravity)
+  (PORTAIS)) ;POSSIVEL PROBLEMA
+
+(define (TECLAS w key)   
+  (cond [(and (key=? key "right") (equal? status "game")) (DIREITA)]         
+        [(and (key=? key "left") (equal? status "game")) (ESQUERDA)]
+        [(key=? key " ") (PORTAL-F)]
+        [(and (key=? key "right") (equal? status "portal-in")) (DIREITA-PORTAL-IN)]
+        [(and (key=? key "left") (equal? status "portal-in")) (ESQUERDA-PORTAL-IN)]
+        [(and (key=? key "up") (equal? status "portal-in")) (CIMA-PORTAL-IN)]
+        [(and (key=? key "down") (equal? status "portal-in")) (BAIXO-PORTAL-IN)]
+        [(and (key=? key "right") (equal? status "portal-out")) (DIREITA-PORTAL-OUT)]
+        [(and (key=? key "left") (equal? status "portal-out")) (ESQUERDA-PORTAL-OUT)]
+        [(and (key=? key "up") (equal? status "portal-out")) (CIMA-PORTAL-OUT)]
+        [(and (key=? key "down") (equal? status "portal-out")) (BAIXO-PORTAL-OUT)]
+        [(key=? key "s") (save-game)]
+        [(key=? key "l") (load-game)]
+        #|[(PARADO)]|#))
+
+(define (DIREITA)
+  (cond [(< (+ (player-posx JOGADOR) 6) 800) (set-player-posx! JOGADOR (+ (player-posx JOGADOR) 6))]))
+(define (ESQUERDA)
+  (cond [(> (- (player-posx JOGADOR) 6) 0) (set-player-posx! JOGADOR (- (player-posx JOGADOR) 6))]))
+(define (PORTAL-F)
+  (cond [(equal? status "game") (PORTAL-IN-F)]
+        [(and (equal? status "portal-in") (OK-Portal-In)) (PORTAL-OUT-F)]
+        [(and (equal? status "portal-out") (OK-Portal-Out)) (GAME-F)]))
+
+(define (PORTAL-IN-F)
+  (set! status "portal-in")
+  (cond [(false? (portal-ativo-in PORTAL)) (DEFINIR-PORTAL-IN-PROXIMO)])
+  (set-portal-ativo-in! PORTAL #t))
+(define (PORTAL-OUT-F)
+  (set! status "portal-out")
+  (cond [(false? (portal-ativo-out PORTAL)) (DEFINIR-PORTAL-OUT-PROXIMO)])
+  (set-portal-ativo-out! PORTAL #t))
+(define (GAME-F)
+  (set! status "game"))
+  
+(define (DEFINIR-PORTAL-IN-PROXIMO)  
+  (set-portal-posx-in! PORTAL (player-posx JOGADOR))
+  (set-portal-posy-in! PORTAL (player-posy JOGADOR)))
+(define (DEFINIR-PORTAL-OUT-PROXIMO)  
+  (set-portal-posx-out! PORTAL (player-posx JOGADOR))
+  (set-portal-posy-out! PORTAL (player-posy JOGADOR)))
+
+(define (DIREITA-PORTAL-IN)
+  (cond [(< (+ (portal-posx-in PORTAL) 38) 800) (set-portal-posx-in! PORTAL (+ (portal-posx-in PORTAL) 6))]))
+(define (ESQUERDA-PORTAL-IN)
+  (cond [(> (- (portal-posx-in PORTAL) 38) 0) (set-portal-posx-in! PORTAL (- (portal-posx-in PORTAL) 6))]))
+(define (BAIXO-PORTAL-IN)
+  (cond [(< (+ (portal-posy-in PORTAL) 38) 600) (set-portal-posy-in! PORTAL (+ (portal-posy-in PORTAL) 6))]))
+(define (CIMA-PORTAL-IN)
+  (cond [(> (- (portal-posy-in PORTAL) 38) 0) (set-portal-posy-in! PORTAL (- (portal-posy-in PORTAL) 6))]))
+(define (DIREITA-PORTAL-OUT)
+ (cond [(< (+ (portal-posx-out PORTAL) 38) 800) (set-portal-posx-out! PORTAL (+ (portal-posx-out PORTAL) 6))]))
+(define (ESQUERDA-PORTAL-OUT)
+   (cond [(> (- (portal-posx-out PORTAL) 38) 0) (set-portal-posx-out! PORTAL (- (portal-posx-out PORTAL) 6))]))
+(define (BAIXO-PORTAL-OUT)
+  (cond [(< (+ (portal-posy-out PORTAL) 38) 600) (set-portal-posy-out! PORTAL (+ (portal-posy-out PORTAL) 6))]))
+(define (CIMA-PORTAL-OUT)
+ (cond [(< (+ (portal-posy-out PORTAL) 38) 800) (set-portal-posy-out! PORTAL (- (portal-posy-out PORTAL) 6))]))
+
+
+;SAVE GAME EXEMPLO!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;=================================================================================================================================================================;
+(define (save-game)
+  (write-file "save-game.txt" (string-append 
+                               (format "~a\n" (player-posx JOGADOR)) 
+                               (format "~a\n" (player-posy JOGADOR))
+                               (format "~a\n" pontuacao))))
+(define (load-game)
+  (set! save-temp (read-lines "save-game.txt"))
+  (set-player-posx! JOGADOR (string->number (first save-temp)))
+  (set-player-posy! JOGADOR (string->number (second save-temp)))
+  (set! pontuacao (string->number (third save-temp))))
+
+;(define (PARADO)
+;  trocar a imagem do jogador para uma dele parado
+
+
+
+
+;Testa a distancia do portal azul até o jogador
+(define (OK-Portal-In)
+  (if (and (< (DISTANCIA (portal-posx-in PORTAL) (portal-posy-in PORTAL) (player-posx JOGADOR) (player-posy JOGADOR)) 200)
+           (> (DISTANCIA (portal-posx-in PORTAL) (portal-posy-in PORTAL) (player-posx JOGADOR) (player-posy JOGADOR)) 10))#t #f))
+;Testa a distancia do portal laranja até o portal azul
+(define (OK-Portal-Out)
+  (if (and (< (DISTANCIA (portal-posx-out PORTAL) (portal-posy-out PORTAL) (portal-posx-in PORTAL) (portal-posy-in PORTAL)) 200)
+           (> (DISTANCIA (portal-posx-out PORTAL) (portal-posy-out PORTAL) (portal-posx-in PORTAL) (portal-posy-in PORTAL)) 10))#t #f))
+   
+(define (DISTANCIA x1 y1 x2 y2)
+  (sqrt (+ (expt (- x1 x2) 2) (expt (- y1 y2) 2))))
+
+
+(define (SCENE)
+  (cond [(portal-ativo-in PORTAL) (place-image PORTAL-IN-IMAGE (portal-posx-in PORTAL) (portal-posy-in PORTAL) (SCENE-2))]
+        [(false? (portal-ativo-in PORTAL)) (place-image VAZIO (portal-posx-in PORTAL) (portal-posy-in PORTAL) (SCENE-2))]))
+
+(define (SCENE-2)
+  (cond [(portal-ativo-out PORTAL) (place-image PORTAL-OUT-IMAGE (portal-posx-out PORTAL) (portal-posy-out PORTAL) CENARIO)]
+        [(false? (portal-ativo-out PORTAL)) (place-image VAZIO (portal-posx-in PORTAL) (portal-posy-in PORTAL) CENARIO)]))
+
+(define (GAME-IMAGE)
+  (place-image (player-imagem JOGADOR) (player-posx JOGADOR) (player-posy JOGADOR) (SCENE)))
+
+(define (TELA w)
+  (overlay/align "left" "top" (text/font (format "Portais: ~a" pontuacao) 15 "white" "trebuchet ms" 'swiss 'normal 'bold #f) (GAME-IMAGE)))
+
+(define (TELA-ESCURECIDA)
+  (place-image DARK-SCREEN 400 300 (TELA 0)))
+
+(define (PORTAIS)
+  (cond [(and (and (equal? status "game") (PROXIMO-PORTAL-IN)) (and (portal-ativo-in PORTAL) (portal-ativo-out PORTAL))) (ATRAVESSA-PORTAL)]))
+
+(define (PROXIMO-PORTAL-IN)
+  (if (< (sqrt (+ (expt (- (player-posx JOGADOR) (portal-posx-in PORTAL)) 2) (expt (- (player-posy JOGADOR) (portal-posy-in PORTAL)) 2))) 20) #t #f))
+
+(define (ATRAVESSA-PORTAL)
+  (set-player-posx! JOGADOR (portal-posx-out PORTAL))
+  (set-player-posy! JOGADOR (portal-posy-out PORTAL))
+  (set-portal-ativo-in! PORTAL #f)
+  (set-portal-ativo-out! PORTAL #f)
+  (set! pontuacao (+ pontuacao 1)))
+
+(define (FIM? w)
+  (if (or (Venceu) (Perdeu)) #t #f))
+
+(define (Venceu)
+  (if (< (sqrt (+ (expt (- (player-posx JOGADOR) portal-final-posx) 2) (expt (- (player-posy JOGADOR) portal-final-posy) 2))) 10) #t #f))
+
+(define (Perdeu)
+  (if (or (or (or (> (player-posx JOGADOR) 800) (< (player-posx JOGADOR) 0)) (or (> (player-posy JOGADOR) 600) (< (player-posy JOGADOR) 0))) (DEATHZONE DEATHZONES)) #t #f))
+
+(define (TELA-FIM w)
+  (overlay (text/font (format "Fim do Jogo! Pontuação: ~a" pontuacao) 30 "white" "trebuchet ms" 'swiss 'normal 'bold #f) 
+           (TELA-ESCURECIDA)))
+
+(big-bang 0
+          (on-tick GRAVIDADE-E-PORTAIS)
+          (on-key TECLAS)
+          (to-draw TELA)
+          (stop-when FIM? TELA-FIM))
