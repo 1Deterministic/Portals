@@ -1,5 +1,5 @@
 <h2><strong><center>Portals</center></strong></h2>
-<a href="#br"><strong>Portugûes</strong></a><br>
+<a href="#br"><strong>Português</strong></a><br>
 <a href="#en"><strong>English</strong></a><br>
 
 <h3 id="br"><center>Português</center></h3>
